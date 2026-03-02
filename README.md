@@ -12,35 +12,49 @@ x7: RiskTier                # → picks an enum member
 
 A **semantic index type** is a type declaration in which natural-language tokens — field names, descriptions, enum member names — function as computational indices that shape the output of a neural consumer. The name doesn't just label a slot. It tells the model what to compute.
 
+## Five Principles
+
+**1. Naming is programming.** Choosing `churn_risk_tier` over `attrition_risk_tier` is choosing between two analytical framings — voluntary departure versus passive loss. It shapes what the model weighs, what thresholds it applies, what risk narrative it constructs. The field name is an instruction. Changing the name changes the computation.
+
+**2. Descriptions are program text.** `Field(description=...)` content propagates into the JSON Schema the model reads. A description that says "Projected total revenue across the full customer relationship, not historical sum" narrows the model's interpretation from a broad concept to a specific calculation. Removing the description changes the output distribution. It is part of the program.
+
+**3. Renaming is refactoring.** In traditional programming, renaming a variable is a safe, mechanical operation — the behavior doesn't change. With language models consuming schemas, that invariant breaks. Empirical evidence shows renaming-class transformations produce 7–50% output degradation across benchmarks and model families. Renaming requires the same care as modifying function logic.
+
+**4. Types constrain, names guide.** The type annotation bounds what the model can produce — a 4-member enum admits exactly 4 values. The field name and description guide which of those valid values the model selects. The tighter the type constraint, the less the name needs to do. A `bool` gives the name 1 bit of influence. A bare `str` gives it everything. This is why you want both: tight types for structural proof, precise names for semantic guidance.
+
+**5. If names are instructions, they are also attack vectors.** Every field name and description is a point where the data/instruction boundary collapses — the same class of vulnerability that underlies SQL injection and XSS, instantiated at the schema level. An adversarial field description exploits the same channel a legitimate one uses for guidance.
+
 ## Why This Happens
 
-Traditional types compile to machine code that erases names. The CPU has no use for `churn_risk_tier` — it sees a memory offset. Alpha equivalence holds because the compilation target doesn't read names.
+Traditional types compile to machine code that erases names. The CPU has no use for `churn_risk_tier` — it sees a memory offset. Renaming is safe because the compilation target doesn't read names.
 
-Schema-driven types compile to token sequences consumed by a neural network that *reads* them. The compilation target changed. Names survive into the execution context, and the model interprets them as natural-language instructions. Alpha equivalence fails — not in the abstract, but because the new target architecture doesn't erase what the old one did.
+Schema-driven types compile to token sequences consumed by a neural network that *reads* them. The compilation target changed. Names survive into the execution context, and the model interprets them as natural-language instructions. Renaming breaks things — not because of a bug, but because the new target architecture treats names as computation.
 
-## What the Paper Contributes
+## The Formal Framework
 
-The [paper](semantic-index-types.md) formalizes this as a **two-channel constraint system**:
+The [paper](semantic-index-types.md) makes this precise. It defines a **two-channel constraint system**:
 
-- The **structural channel** (type annotations, enum membership, validators, constrained decoding) bounds the space of valid outputs. It obeys alpha equivalence. It is mechanically enforced.
-- The **semantic channel** (field names, descriptions, enum labels) guides the consumer's selection within that space. It violates alpha equivalence. It is neurally interpreted.
+- The **structural channel** (type annotations, enum membership, validators, constrained decoding) determines the *support* of the output distribution — the set of values the model can produce. Mechanically enforced. Invariant under renaming.
+- The **semantic channel** (field names, descriptions, enum labels) determines the *conditional probabilities* within that support — which valid value the model selects. Neurally interpreted. Not invariant under renaming.
 
-The interaction between the channels has **information-theoretic structure**: the semantic channel's effective capacity is bounded by the structural compression of the type. A `bool` gives 1 bit of semantic influence. A four-member enum gives 2 bits. A bare `str` gives unbounded capacity. This single quantity governs both the engineering design space and the security attack surface — the same variable controls how much a well-chosen name can help and how much an adversarial name can exploit.
+The interaction between the channels has **information-theoretic structure**. For a field $f$ with valid set $V_f$, the mutual information between the schema naming and the model's output is bounded:
 
-The paper traces **converging empirical evidence** from three independently evolved research communities — schema-guided dialogue (SGD-X), text-to-SQL schema linking (Dr.Spider, BIRD), and code language model robustness (identifier obfuscation studies) — showing that each independently discovered what amounts to linguistic relativity for neural consumers: the vocabulary of the schema determines the output distribution of the model.
+$$I(N; Y_f) \leq H(Y_f) \leq \log_2 |V_f|$$
 
-## Practical Consequences
+This single inequality governs both the engineering design space (how much a precise name helps) and the security attack surface (how much an adversarial name hurts). The paper defines a citable metric — **semantic index sensitivity** $d_f(S, S')$ — that directly measures the distributional shift when names change and structure doesn't.
 
-- **Naming is programming.** Choosing `churn_risk_tier` over `attrition_risk_tier` is choosing between two analytical framings. It shapes what the model weighs, what thresholds it applies, what risk narrative it constructs.
-- **Renaming is refactoring.** Empirical evidence shows renaming-class transformations produce 7–50% output degradation across benchmarks and model families. Renaming requires the same care as modifying function logic.
-- **Descriptions are program text.** `Field(description=...)` content propagates into the schema the model reads. Removing a description changes the output distribution. It is part of the program.
-- **Progressive hardening is the development methodology.** Start with semantic precision. Observe where the semantic channel fails. Promote those failures into structural guarantees — validators, tighter types, constrained decoding. Each step converts soft guidance into hard proof.
-- **If names are instructions, they are also attack vectors.** Every field name and description is a point where the data/instruction boundary collapses — the same class of vulnerability that underlies SQL injection and XSS, instantiated at the schema level.
+**Progressive hardening** is the development methodology: start with semantic precision (good names, clear descriptions). Observe where the semantic channel fails. Promote those failures into structural guarantees — validators, tighter types, constrained decoding. Each step converts soft guidance into hard proof.
+
+## The Experiment
+
+We're running an experiment to measure this directly. Four structurally isomorphic Pydantic schemas — baseline (precise names), names-only (names without descriptions), vacuous (structural identifiers only), and misleading (coherent wrong-domain names) — applied to the same customer analysis task across multiple language models. The experiment measures $\Delta H_f$ (entropy reduction from semantic indices) and plots sensitivity against structural compression. Methodology is defined in [experiment.md](experiment.md); results are pending.
 
 ## Repository Contents
 
 - [`semantic-index-types.md`](semantic-index-types.md) — the paper
+- [`experiment.md`](experiment.md) — experiment design
 - `sit/` — experiment code (in progress)
+- [`.agents/scripts/building_block.py`](.agents/scripts/building_block.py) — recursive Pydantic type classifier (dev tool + TCA teaching example)
 
 ## License
 
